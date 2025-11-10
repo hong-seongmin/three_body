@@ -113,6 +113,111 @@ class PhysicsEngine {
             body.acceleration.set(0, 0, 0);
         }
     }
+
+    // 운동 에너지 계산 (KE = 1/2 * m * v^2)
+    calculateKineticEnergy(bodyIndex = -1) {
+        if (bodyIndex >= 0 && bodyIndex < this.bodies.length) {
+            // 특정 물체의 운동 에너지
+            const body = this.bodies[bodyIndex];
+            const speedSquared = body.velocity.lengthSq();
+            return 0.5 * body.mass * speedSquared;
+        } else {
+            // 전체 시스템의 운동 에너지
+            let totalKE = 0;
+            for (let body of this.bodies) {
+                const speedSquared = body.velocity.lengthSq();
+                totalKE += 0.5 * body.mass * speedSquared;
+            }
+            return totalKE;
+        }
+    }
+
+    // 위치 에너지 계산 (PE = -G * m1 * m2 / r)
+    calculatePotentialEnergy() {
+        let totalPE = 0;
+        for (let i = 0; i < this.bodies.length; i++) {
+            for (let j = i + 1; j < this.bodies.length; j++) {
+                const body1 = this.bodies[i];
+                const body2 = this.bodies[j];
+                const distance = body1.position.distanceTo(body2.position);
+
+                if (distance > 0) {
+                    totalPE -= (this.G * body1.mass * body2.mass) / distance;
+                }
+            }
+        }
+        return totalPE;
+    }
+
+    // 총 에너지 계산
+    calculateTotalEnergy() {
+        return this.calculateKineticEnergy() + this.calculatePotentialEnergy();
+    }
+
+    // 운동량 계산 (p = m * v)
+    calculateMomentum() {
+        const totalMomentum = new THREE.Vector3(0, 0, 0);
+        for (let body of this.bodies) {
+            const momentum = body.velocity.clone().multiplyScalar(body.mass);
+            totalMomentum.add(momentum);
+        }
+        return totalMomentum;
+    }
+
+    // 각운동량 계산 (L = r × p)
+    calculateAngularMomentum() {
+        const totalAngularMomentum = new THREE.Vector3(0, 0, 0);
+        for (let body of this.bodies) {
+            const momentum = body.velocity.clone().multiplyScalar(body.mass);
+            const angularMomentum = new THREE.Vector3().crossVectors(body.position, momentum);
+            totalAngularMomentum.add(angularMomentum);
+        }
+        return totalAngularMomentum;
+    }
+
+    // 질량 중심 계산
+    calculateCenterOfMass() {
+        let totalMass = 0;
+        const centerOfMass = new THREE.Vector3(0, 0, 0);
+
+        for (let body of this.bodies) {
+            centerOfMass.add(body.position.clone().multiplyScalar(body.mass));
+            totalMass += body.mass;
+        }
+
+        if (totalMass > 0) {
+            centerOfMass.divideScalar(totalMass);
+        }
+
+        return centerOfMass;
+    }
+
+    // 물체 간 거리 계산
+    getDistance(index1, index2) {
+        if (index1 < this.bodies.length && index2 < this.bodies.length) {
+            return this.bodies[index1].position.distanceTo(this.bodies[index2].position);
+        }
+        return 0;
+    }
+
+    // 물체의 현재 힘 벡터 계산 (시각화용)
+    calculateForceVector(bodyIndex) {
+        if (bodyIndex >= this.bodies.length) {
+            return new THREE.Vector3(0, 0, 0);
+        }
+
+        const body = this.bodies[bodyIndex];
+        const totalForce = new THREE.Vector3(0, 0, 0);
+
+        for (let j = 0; j < this.bodies.length; j++) {
+            if (bodyIndex !== j) {
+                const force = this.calculateGravitationalForce(body, this.bodies[j]);
+                totalForce.add(force);
+            }
+        }
+
+        return totalForce;
+    }
 }
 
 // 사전 설정된 흥미로운 3체 문제 구성

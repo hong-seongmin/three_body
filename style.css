@@ -210,6 +210,128 @@ span {
     color: #4dabf7;
 }
 
+/* 그래프 패널 */
+#graphs-panel {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.graph-container {
+    background: rgba(10, 10, 30, 0.9);
+    padding: 15px;
+    border-radius: 10px;
+    border: 1px solid rgba(100, 255, 218, 0.3);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+    width: 400px;
+    pointer-events: auto;
+}
+
+.graph-container h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #64ffda;
+    text-align: center;
+    font-weight: 600;
+}
+
+.graph-container canvas {
+    display: block;
+    width: 100% !important;
+    height: 150px !important;
+}
+
+/* 통계 섹션 */
+.stats-section {
+    background: rgba(100, 255, 218, 0.1) !important;
+    border: 1px solid rgba(100, 255, 218, 0.3) !important;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-item:last-child {
+    border-bottom: none;
+}
+
+.stat-label {
+    font-size: 13px;
+    color: #b0b0b0;
+    font-weight: normal;
+}
+
+.stat-item > span:last-child {
+    font-size: 14px;
+    color: #64ffda;
+    font-weight: bold;
+}
+
+/* 물체별 정보 */
+.body-info {
+    margin-bottom: 15px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.body-info h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.body-info:last-child {
+    margin-bottom: 0;
+}
+
+.info-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.info-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+}
+
+.info-label {
+    color: #b0b0b0;
+    font-weight: normal;
+}
+
+.info-item > span:last-child {
+    color: #64ffda;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+/* 에너지 오차 색상 */
+#energy-error.low {
+    color: #51cf66 !important;
+}
+
+#energy-error.medium {
+    color: #ffd93d !important;
+}
+
+#energy-error.high {
+    color: #ff6b6b !important;
+}
+
 @media (max-width: 768px) {
     #container {
         flex-direction: column;
@@ -220,5 +342,16 @@ span {
         height: 50vh;
         border-left: none;
         border-top: 2px solid #4a4a6a;
+    }
+
+    #graphs-panel {
+        flex-direction: row;
+        overflow-x: auto;
+        width: calc(100% - 40px);
+    }
+
+    .graph-container {
+        width: 300px;
+        flex-shrink: 0;
     }
 }

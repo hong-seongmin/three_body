@@ -2,12 +2,25 @@
 let scene, camera, renderer, controls;
 let bodies = [];
 let trails = [];
+let velocityArrows = [];
+let forceArrows = [];
+let centerOfMassMesh = null;
 let physicsEngine;
 let isPlaying = false;
 let showTrails = true;
+let showVectors = false;
+let showCenterOfMass = true;
 let timeSpeed = 1.0;
 let selectedBody = null;
 let raycaster, mouse;
+let simulationTime = 0;
+let initialEnergy = null;
+
+// 그래프 관련
+let energyChart, distanceChart;
+let energyData = { time: [], total: [], kinetic: [], potential: [] };
+let distanceData = { time: [], d01: [], d02: [], d12: [] };
+const MAX_GRAPH_POINTS = 200;
 
 const BODY_COLORS = [0xff6b6b, 0x51cf66, 0x4dabf7];
 const MAX_TRAIL_POINTS = 500;
@@ -49,23 +62,26 @@ function init() {
     // 별 배경 추가
     addStars();
 
-    // 그리드 추가 (선택사항)
+    // 그리드 추가
     const gridHelper = new THREE.GridHelper(200, 20, 0x444444, 0x222222);
     scene.add(gridHelper);
 
-    // 좌표축 헬퍼 (선택사항)
+    // 좌표축 헬퍼
     const axesHelper = new THREE.AxesHelper(100);
     scene.add(axesHelper);
 
     // 물리 엔진 초기화
     physicsEngine = new PhysicsEngine();
 
-    // 레이캐스터 초기화 (마우스 인터랙션용)
+    // 레이캐스터 초기화
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
 
     // 3개의 물체 생성
     createBodies();
+
+    // 그래프 초기화
+    initCharts();
 
     // UI 이벤트 리스너 설정
     setupEventListeners();
@@ -76,23 +92,25 @@ function init() {
     // 윈도우 리사이즈
     window.addEventListener('resize', onWindowResize);
 
+    // 초기 에너지 기록
+    initialEnergy = physicsEngine.calculateTotalEnergy();
+
     // 애니메이션 시작
     animate();
 }
 
 // OrbitControls 설정
 function setupOrbitControls() {
-    // 간단한 OrbitControls 구현
     let isDragging = false;
     let previousMousePosition = { x: 0, y: 0 };
     let isRightDragging = false;
 
     renderer.domElement.addEventListener('mousedown', (e) => {
-        if (selectedBody) return; // 물체 선택 중일 때는 카메라 회전 안함
+        if (selectedBody) return;
 
-        if (e.button === 0) { // 좌클릭
+        if (e.button === 0) {
             isDragging = true;
-        } else if (e.button === 2) { // 우클릭
+        } else if (e.button === 2) {
             isRightDragging = true;
         }
         previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -107,7 +125,6 @@ function setupOrbitControls() {
 
             const rotationSpeed = 0.005;
 
-            // 카메라를 원점 중심으로 회전
             const offset = camera.position.clone();
             const spherical = new THREE.Spherical().setFromVector3(offset);
 
@@ -179,6 +196,62 @@ function addStars() {
     scene.add(stars);
 }
 
+// 질량 중심 메쉬 생성
+function createCenterOfMassMesh() {
+    if (centerOfMassMesh) {
+        scene.remove(centerOfMassMesh);
+    }
+
+    const geometry = new THREE.SphereGeometry(3, 16, 16);
+    const material = new THREE.MeshBasicMaterial({
+        color: 0xffff00,
+        transparent: true,
+        opacity: 0.6,
+        wireframe: true
+    });
+
+    centerOfMassMesh = new THREE.Mesh(geometry, material);
+    scene.add(centerOfMassMesh);
+    centerOfMassMesh.visible = showCenterOfMass;
+}
+
+// 벡터 화살표 생성
+function createVectorArrows() {
+    // 기존 화살표 제거
+    velocityArrows.forEach(arrow => scene.remove(arrow));
+    forceArrows.forEach(arrow => scene.remove(arrow));
+    velocityArrows = [];
+    forceArrows = [];
+
+    for (let i = 0; i < 3; i++) {
+        // 속도 벡터 (밝은 색)
+        const velArrow = new THREE.ArrowHelper(
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(0, 0, 0),
+            10,
+            BODY_COLORS[i],
+            5,
+            3
+        );
+        velArrow.visible = showVectors;
+        scene.add(velArrow);
+        velocityArrows.push(velArrow);
+
+        // 힘 벡터 (어두운 색)
+        const forceArrow = new THREE.ArrowHelper(
+            new THREE.Vector3(1, 0, 0),
+            new THREE.Vector3(0, 0, 0),
+            10,
+            BODY_COLORS[i] & 0x888888,
+            5,
+            3
+        );
+        forceArrow.visible = showVectors;
+        scene.add(forceArrow);
+        forceArrows.push(forceArrow);
+    }
+}
+
 // 물체 생성
 function createBodies() {
     // 기존 물체 제거
@@ -248,6 +321,155 @@ function createBodies() {
         // 물리 엔진에 추가
         physicsEngine.addBody(mass, position, velocity);
     });
+
+    // 질량 중심 메쉬 생성
+    createCenterOfMassMesh();
+
+    // 벡터 화살표 생성
+    createVectorArrows();
+
+    // 시뮬레이션 시간 및 초기 에너지 리셋
+    simulationTime = 0;
+    initialEnergy = physicsEngine.calculateTotalEnergy();
+
+    // 그래프 데이터 리셋
+    energyData = { time: [], total: [], kinetic: [], potential: [] };
+    distanceData = { time: [], d01: [], d02: [], d12: [] };
+    if (energyChart) {
+        energyChart.data.labels = [];
+        energyChart.data.datasets.forEach(dataset => dataset.data = []);
+        energyChart.update();
+    }
+    if (distanceChart) {
+        distanceChart.data.labels = [];
+        distanceChart.data.datasets.forEach(dataset => dataset.data = []);
+        distanceChart.update();
+    }
+
+    // 통계 업데이트
+    updateStatistics();
+}
+
+// 그래프 초기화
+function initCharts() {
+    // 에너지 그래프
+    const energyCtx = document.getElementById('energy-chart').getContext('2d');
+    energyChart = new Chart(energyCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: '총 에너지',
+                    data: [],
+                    borderColor: '#64ffda',
+                    backgroundColor: 'rgba(100, 255, 218, 0.1)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                },
+                {
+                    label: '운동 에너지',
+                    data: [],
+                    borderColor: '#ff6b6b',
+                    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    tension: 0.4
+                },
+                {
+                    label: '위치 에너지',
+                    data: [],
+                    borderColor: '#4dabf7',
+                    backgroundColor: 'rgba(77, 171, 247, 0.1)',
+                    borderWidth: 1,
+                    pointRadius: 0,
+                    tension: 0.4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: '#ffffff', font: { size: 10 } }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#888888', font: { size: 9 } }
+                },
+                y: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#888888', font: { size: 9 } }
+                }
+            }
+        }
+    });
+
+    // 거리 그래프
+    const distanceCtx = document.getElementById('distance-chart').getContext('2d');
+    distanceChart = new Chart(distanceCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: '물체 1-2',
+                    data: [],
+                    borderColor: '#ff6b6b',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                },
+                {
+                    label: '물체 1-3',
+                    data: [],
+                    borderColor: '#51cf66',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                },
+                {
+                    label: '물체 2-3',
+                    data: [],
+                    borderColor: '#4dabf7',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.4
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: { color: '#ffffff', font: { size: 10 } }
+                }
+            },
+            scales: {
+                x: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#888888', font: { size: 9 } }
+                },
+                y: {
+                    display: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                    ticks: { color: '#888888', font: { size: 9 } }
+                }
+            }
+        }
+    });
 }
 
 // UI 이벤트 리스너 설정
@@ -273,6 +495,21 @@ function setupEventListeners() {
         trails.forEach(trail => {
             trail.line.visible = showTrails;
         });
+    });
+
+    // 벡터 토글
+    document.getElementById('vector-toggle').addEventListener('change', (e) => {
+        showVectors = e.target.checked;
+        velocityArrows.forEach(arrow => arrow.visible = showVectors);
+        forceArrows.forEach(arrow => arrow.visible = showVectors);
+    });
+
+    // 질량 중심 토글
+    document.getElementById('center-of-mass-toggle').addEventListener('change', (e) => {
+        showCenterOfMass = e.target.checked;
+        if (centerOfMassMesh) {
+            centerOfMassMesh.visible = showCenterOfMass;
+        }
     });
 
     // 시간 속도
@@ -348,14 +585,17 @@ function updateBodyFromUI(index) {
 
     // 궤적 초기화
     trails[index].points = [];
+
+    // 초기 에너지 업데이트
+    initialEnergy = physicsEngine.calculateTotalEnergy();
 }
 
-// 마우스 이벤트 설정 (물체 드래그)
+// 마우스 이벤트 설정
 function setupMouseEvents() {
     const container = document.getElementById('canvas-container');
 
     container.addEventListener('mousedown', (event) => {
-        if (event.button !== 0) return; // 좌클릭만
+        if (event.button !== 0) return;
 
         const rect = renderer.domElement.getBoundingClientRect();
         mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -381,7 +621,6 @@ function setupMouseEvents() {
 
         raycaster.setFromCamera(mouse, camera);
 
-        // 카메라와 평행한 평면에 투영
         const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
         const intersection = new THREE.Vector3();
         raycaster.ray.intersectPlane(plane, intersection);
@@ -389,7 +628,6 @@ function setupMouseEvents() {
         if (intersection) {
             selectedBody.position.copy(intersection);
 
-            // 해당 물체의 UI 업데이트
             const bodyIndex = bodies.findIndex(b => b.mesh === selectedBody);
             if (bodyIndex !== -1) {
                 updateUIFromBody(bodyIndex);
@@ -430,12 +668,10 @@ function updateTrails() {
         const trail = trails[index];
         trail.points.push(body.mesh.position.clone());
 
-        // 최대 포인트 수 제한
         if (trail.points.length > MAX_TRAIL_POINTS) {
             trail.points.shift();
         }
 
-        // 라인 업데이트
         const positions = new Float32Array(trail.points.length * 3);
         trail.points.forEach((point, i) => {
             positions[i * 3] = point.x;
@@ -454,6 +690,147 @@ function clearTrails() {
         trail.points = [];
         trail.line.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
     });
+}
+
+// 벡터 업데이트
+function updateVectors() {
+    if (!showVectors) return;
+
+    bodies.forEach((body, index) => {
+        const physBody = physicsEngine.bodies[index];
+
+        // 속도 벡터
+        const velocity = physBody.velocity.clone();
+        const velLength = velocity.length();
+        if (velLength > 0.01) {
+            velocityArrows[index].position.copy(body.mesh.position);
+            velocityArrows[index].setDirection(velocity.normalize());
+            velocityArrows[index].setLength(Math.min(velLength * 3, 50));
+        } else {
+            velocityArrows[index].setLength(0);
+        }
+
+        // 힘 벡터
+        const force = physicsEngine.calculateForceVector(index);
+        const forceLength = force.length();
+        if (forceLength > 0.01) {
+            forceArrows[index].position.copy(body.mesh.position);
+            forceArrows[index].setDirection(force.normalize());
+            forceArrows[index].setLength(Math.min(forceLength * 0.5, 30));
+        } else {
+            forceArrows[index].setLength(0);
+        }
+    });
+}
+
+// 질량 중심 업데이트
+function updateCenterOfMass() {
+    if (!showCenterOfMass || !centerOfMassMesh) return;
+
+    const com = physicsEngine.calculateCenterOfMass();
+    centerOfMassMesh.position.copy(com);
+}
+
+// 통계 업데이트
+function updateStatistics() {
+    // 시뮬레이션 시간
+    document.getElementById('sim-time').textContent = simulationTime.toFixed(1) + ' s';
+
+    // 에너지
+    const totalEnergy = physicsEngine.calculateTotalEnergy();
+    const kineticEnergy = physicsEngine.calculateKineticEnergy();
+    const potentialEnergy = physicsEngine.calculatePotentialEnergy();
+
+    document.getElementById('total-energy').textContent = totalEnergy.toFixed(2) + ' J';
+    document.getElementById('kinetic-energy').textContent = kineticEnergy.toFixed(2) + ' J';
+    document.getElementById('potential-energy').textContent = potentialEnergy.toFixed(2) + ' J';
+
+    // 에너지 오차
+    const energyError = initialEnergy !== 0 ? Math.abs((totalEnergy - initialEnergy) / initialEnergy) * 100 : 0;
+    const errorElement = document.getElementById('energy-error');
+    errorElement.textContent = energyError.toFixed(4) + '%';
+
+    // 에너지 오차 색상
+    errorElement.classList.remove('low', 'medium', 'high');
+    if (energyError < 0.1) {
+        errorElement.classList.add('low');
+    } else if (energyError < 1) {
+        errorElement.classList.add('medium');
+    } else {
+        errorElement.classList.add('high');
+    }
+
+    // 물체별 정보
+    const bodyInfos = document.querySelectorAll('.body-info');
+    bodyInfos.forEach((info, index) => {
+        const physBody = physicsEngine.bodies[index];
+        const pos = physBody.position;
+        const vel = physBody.velocity.length();
+        const ke = physicsEngine.calculateKineticEnergy(index);
+
+        info.querySelector('.body-position').textContent =
+            `${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`;
+        info.querySelector('.body-velocity').textContent = vel.toFixed(2);
+        info.querySelector('.body-ke').textContent = ke.toFixed(2) + ' J';
+    });
+
+    // 물체 간 거리
+    document.getElementById('distance-01').textContent = physicsEngine.getDistance(0, 1).toFixed(2);
+    document.getElementById('distance-02').textContent = physicsEngine.getDistance(0, 2).toFixed(2);
+    document.getElementById('distance-12').textContent = physicsEngine.getDistance(1, 2).toFixed(2);
+}
+
+// 그래프 업데이트
+let graphUpdateCounter = 0;
+function updateGraphs() {
+    graphUpdateCounter++;
+    if (graphUpdateCounter < 5) return; // 5프레임마다 업데이트
+    graphUpdateCounter = 0;
+
+    const totalEnergy = physicsEngine.calculateTotalEnergy();
+    const kineticEnergy = physicsEngine.calculateKineticEnergy();
+    const potentialEnergy = physicsEngine.calculatePotentialEnergy();
+
+    const d01 = physicsEngine.getDistance(0, 1);
+    const d02 = physicsEngine.getDistance(0, 2);
+    const d12 = physicsEngine.getDistance(1, 2);
+
+    // 데이터 추가
+    energyData.time.push(simulationTime.toFixed(1));
+    energyData.total.push(totalEnergy);
+    energyData.kinetic.push(kineticEnergy);
+    energyData.potential.push(potentialEnergy);
+
+    distanceData.time.push(simulationTime.toFixed(1));
+    distanceData.d01.push(d01);
+    distanceData.d02.push(d02);
+    distanceData.d12.push(d12);
+
+    // 최대 포인트 수 제한
+    if (energyData.time.length > MAX_GRAPH_POINTS) {
+        energyData.time.shift();
+        energyData.total.shift();
+        energyData.kinetic.shift();
+        energyData.potential.shift();
+
+        distanceData.time.shift();
+        distanceData.d01.shift();
+        distanceData.d02.shift();
+        distanceData.d12.shift();
+    }
+
+    // 그래프 업데이트
+    energyChart.data.labels = energyData.time;
+    energyChart.data.datasets[0].data = energyData.total;
+    energyChart.data.datasets[1].data = energyData.kinetic;
+    energyChart.data.datasets[2].data = energyData.potential;
+    energyChart.update('none');
+
+    distanceChart.data.labels = distanceData.time;
+    distanceChart.data.datasets[0].data = distanceData.d01;
+    distanceChart.data.datasets[1].data = distanceData.d02;
+    distanceChart.data.datasets[2].data = distanceData.d12;
+    distanceChart.update('none');
 }
 
 // 프리셋 로드
@@ -510,6 +887,7 @@ function animate() {
     if (isPlaying) {
         // 물리 시뮬레이션 업데이트
         physicsEngine.update(timeSpeed);
+        simulationTime += timeSpeed * physicsEngine.timeStep;
 
         // 메쉬 위치 업데이트
         physicsEngine.bodies.forEach((body, index) => {
@@ -520,6 +898,18 @@ function animate() {
         if (showTrails) {
             updateTrails();
         }
+
+        // 벡터 업데이트
+        updateVectors();
+
+        // 질량 중심 업데이트
+        updateCenterOfMass();
+
+        // 통계 업데이트
+        updateStatistics();
+
+        // 그래프 업데이트
+        updateGraphs();
     }
 
     renderer.render(scene, camera);
